@@ -1,0 +1,14 @@
+name: Holy Grail Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Hello
+        run: |
+          echo "Holy Grail Scanner Started"
+          echo "GitHub Actions Working"
