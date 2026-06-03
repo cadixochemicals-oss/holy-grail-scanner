@@ -1,4 +1,4 @@
-name: Holy Grail Test
+name: Google Sheet Test
 
 on:
   workflow_dispatch:
@@ -8,7 +8,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Hello
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
         run: |
-          echo "Holy Grail Scanner Started"
-          echo "GitHub Actions Working"
+          pip install -r requirements.txt
+
+      - name: Run Sheet Test
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+        run: |
+          python sheet_test.py
