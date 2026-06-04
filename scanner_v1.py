@@ -7,9 +7,9 @@ import os
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 
-# --------------------------
+# ---------------------------------
 # GOOGLE SHEETS
-# --------------------------
+# ---------------------------------
 
 creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
@@ -29,37 +29,35 @@ spreadsheet = client.open_by_key(
 
 worksheet = spreadsheet.worksheet("Daily_MRS")
 
-# --------------------------
-# SYMBOLS
-# --------------------------
+# ---------------------------------
+# LOAD SYMBOLS
+# ---------------------------------
 
 symbols = pd.read_csv("symbols.csv")["Symbol"].tolist()
 
-results = []
-
-# --------------------------
+# ---------------------------------
 # NIFTY
-# --------------------------
+# ---------------------------------
 
 nifty = yf.download(
     "^NSEI",
-    period="3mo",
-    progress=False,
-    auto_adjust=True
+    period="1y",
+    auto_adjust=True,
+    progress=False
 )
-
-print("NIFTY columns:", nifty.columns)
 
 nifty_close = nifty["Close"].squeeze()
 
-nifty_return = (
+nifty_return_30 = (
     nifty_close.iloc[-1] /
     nifty_close.iloc[-30] - 1
 ) * 100
 
-# --------------------------
-# STOCK LOOP
-# --------------------------
+# ---------------------------------
+# SCAN
+# ---------------------------------
+
+results = []
 
 for symbol in symbols:
 
@@ -69,87 +67,113 @@ for symbol in symbols:
 
         df = yf.download(
             symbol,
-            period="6mo",
-            progress=False,
-            auto_adjust=True
+            period="1y",
+            auto_adjust=True,
+            progress=False
         )
 
-        if len(df) < 90:
-            print(f"Skipping {symbol}")
+        if len(df) < 252:
             continue
 
         close = df["Close"].squeeze()
         volume = df["Volume"].squeeze()
 
-        stock_return = (
+        current_price = close.iloc[-1]
+
+        # -----------------------------
+        # Relative Strength
+        # -----------------------------
+
+        stock_return_30 = (
             close.iloc[-1] /
             close.iloc[-30] - 1
         ) * 100
 
-        relative_strength = stock_return - nifty_return
+        relative_strength = (
+            stock_return_30 - nifty_return_30
+        )
+
+        # -----------------------------
+        # Volume Ratio
+        # -----------------------------
 
         vol5 = volume.tail(5).mean()
         vol60 = volume.tail(60).mean()
 
         volume_ratio = 0
 
-        if vol60 != 0:
+        if vol60 > 0:
             volume_ratio = vol5 / vol60
 
-        ret20 = (
-            close.iloc[-1] /
-            close.iloc[-20] - 1
+        # -----------------------------
+        # Distance From 52 Week High
+        # -----------------------------
+
+        high_52w = close.max()
+
+        distance_52w = (
+            current_price / high_52w
         ) * 100
 
-        volatility = (
-            close.pct_change()
-            .tail(90)
-            .std()
-        )
+        # -----------------------------
+        # Attention Event
+        # -----------------------------
 
-        attention_acceleration = 0
+        attention_event = 0
 
-        if volatility != 0:
-            attention_acceleration = ret20 / volatility
+        daily_return = (
+            close.iloc[-1] /
+            close.iloc[-2] - 1
+        ) * 100
 
-        score = (
-            0.30 * relative_strength +
-            40 * volume_ratio +
-            0.30 * attention_acceleration
+        if daily_return > 5:
+            attention_event = 1
+
+        if volume_ratio > 3:
+            attention_event = 1
+
+        # -----------------------------
+        # Attention Score
+        # -----------------------------
+
+        attention_score = (
+            volume_ratio * 20 +
+            relative_strength * 3 +
+            (distance_52w - 80) * 2 +
+            attention_event * 25
         )
 
         results.append([
             datetime.today().strftime("%Y-%m-%d"),
             symbol,
-            0,
             round(float(volume_ratio), 2),
             round(float(relative_strength), 2),
-            round(float(score), 2),
+            round(float(distance_52w), 2),
+            attention_event,
+            round(float(attention_score), 2),
             0
         ])
-
-        print(f"SUCCESS {symbol}")
 
     except Exception as e:
 
         print(f"ERROR {symbol}: {e}")
 
-# --------------------------
-# RANK
-# --------------------------
+# ---------------------------------
+# SORT
+# ---------------------------------
 
 results = sorted(
     results,
-    key=lambda x: x[5],
+    key=lambda x: x[6],
     reverse=True
 )
 
 for rank, row in enumerate(results, start=1):
-    row[6] = rank
+    row[7] = rank
 
-# --------------------------
+# ---------------------------------
 # WRITE TO SHEET
-# --------------------------
+# ---------------------------------
 
 for row in results:
     worksheet.append_row(row)
