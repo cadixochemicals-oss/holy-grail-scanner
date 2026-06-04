@@ -19,9 +19,9 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run Sheet Test
+      - name: Run Scanner
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
         run: |
-          python sheet_test.py
+         python scanner_v1.py
