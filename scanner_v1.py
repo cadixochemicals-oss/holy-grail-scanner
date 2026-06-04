@@ -7,9 +7,9 @@ import os
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 
-# ---------------------------------
-# GOOGLE SHEETS
-# ---------------------------------
+# ==========================================
+# GOOGLE SHEET CONNECTION
+# ==========================================
 
 creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
@@ -29,15 +29,19 @@ spreadsheet = client.open_by_key(
 
 worksheet = spreadsheet.worksheet("Daily_MRS")
 
-# ---------------------------------
-# LOAD SYMBOLS
-# ---------------------------------
+print("Connected to Daily_MRS")
+
+# ==========================================
+# SYMBOLS
+# ==========================================
 
 symbols = pd.read_csv("symbols.csv")["Symbol"].tolist()
 
-# ---------------------------------
-# NIFTY
-# ---------------------------------
+print("Symbols loaded:", len(symbols))
+
+# ==========================================
+# NIFTY DATA
+# ==========================================
 
 nifty = yf.download(
     "^NSEI",
@@ -46,6 +50,11 @@ nifty = yf.download(
     progress=False
 )
 
+print("NIFTY rows:", len(nifty))
+
+if len(nifty) < 50:
+    raise Exception("NIFTY data not downloaded")
+
 nifty_close = nifty["Close"].squeeze()
 
 nifty_return_30 = (
@@ -53,9 +62,11 @@ nifty_return_30 = (
     nifty_close.iloc[-30] - 1
 ) * 100
 
-# ---------------------------------
+print("NIFTY 30D Return:", round(float(nifty_return_30), 2))
+
+# ==========================================
 # SCAN
-# ---------------------------------
+# ==========================================
 
 results = []
 
@@ -63,7 +74,8 @@ for symbol in symbols:
 
     try:
 
-        print(f"Processing {symbol}")
+        print("=" * 50)
+        print("Processing:", symbol)
 
         df = yf.download(
             symbol,
@@ -72,17 +84,24 @@ for symbol in symbols:
             progress=False
         )
 
-        if len(df) < 252:
+        print("Rows downloaded:", len(df))
+
+        if df.empty:
+            print("EMPTY DATA")
+            continue
+
+        if len(df) < 50:
+            print("TOO FEW ROWS")
             continue
 
         close = df["Close"].squeeze()
         volume = df["Volume"].squeeze()
 
-        current_price = close.iloc[-1]
+        current_price = float(close.iloc[-1])
 
-        # -----------------------------
+        # ----------------------
         # Relative Strength
-        # -----------------------------
+        # ----------------------
 
         stock_return_30 = (
             close.iloc[-1] /
@@ -93,9 +112,9 @@ for symbol in symbols:
             stock_return_30 - nifty_return_30
         )
 
-        # -----------------------------
+        # ----------------------
         # Volume Ratio
-        # -----------------------------
+        # ----------------------
 
         vol5 = volume.tail(5).mean()
         vol60 = volume.tail(60).mean()
@@ -105,9 +124,9 @@ for symbol in symbols:
         if vol60 > 0:
             volume_ratio = vol5 / vol60
 
-        # -----------------------------
-        # Distance From 52 Week High
-        # -----------------------------
+        # ----------------------
+        # 52 Week High Distance
+        # ----------------------
 
         high_52w = close.max()
 
@@ -115,9 +134,9 @@ for symbol in symbols:
             current_price / high_52w
         ) * 100
 
-        # -----------------------------
+        # ----------------------
         # Attention Event
-        # -----------------------------
+        # ----------------------
 
         attention_event = 0
 
@@ -132,9 +151,9 @@ for symbol in symbols:
         if volume_ratio > 3:
             attention_event = 1
 
-        # -----------------------------
+        # ----------------------
         # Attention Score
-        # -----------------------------
+        # ----------------------
 
         attention_score = (
             volume_ratio * 20 +
@@ -143,7 +162,7 @@ for symbol in symbols:
             attention_event * 25
         )
 
-        results.append([
+        row = [
             datetime.today().strftime("%Y-%m-%d"),
             symbol,
             round(float(volume_ratio), 2),
@@ -152,15 +171,22 @@ for symbol in symbols:
             attention_event,
             round(float(attention_score), 2),
             0
-        ])
+        ]
+
+        results.append(row)
+
+        print("ADDED:", symbol)
 
     except Exception as e:
 
-        print(f"ERROR {symbol}: {e}")
+        print("ERROR:", symbol)
+        print(str(e))
 
-# ---------------------------------
+# ==========================================
 # SORT
-# ---------------------------------
+# ==========================================
+
+print("Total results before ranking:", len(results))
 
 results = sorted(
     results,
@@ -171,11 +197,11 @@ results = sorted(
 for rank, row in enumerate(results, start=1):
     row[7] = rank
 
-# ---------------------------------
+# ==========================================
 # WRITE TO SHEET
-# ---------------------------------
+# ==========================================
 
 for row in results:
     worksheet.append_row(row)
 
-print(f"{len(results)} rows written")
+print("ROWS WRITTEN:", len(results))
