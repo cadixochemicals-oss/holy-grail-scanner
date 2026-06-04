@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import yfinance as yf
 import gspread
 import json
@@ -39,21 +38,34 @@ symbols = pd.read_csv("symbols.csv")["Symbol"].tolist()
 
 results = []
 
-# NIFTY proxy
-nifty = yf.download("^NSEI", period="3mo", auto_adjust=True, progress=False)
+# --------------------------
+# NIFTY DATA
+# --------------------------
+
+nifty = yf.download(
+    "^NSEI",
+    period="3mo",
+    auto_adjust=True,
+    progress=False
+)
+
+if len(nifty) < 30:
+    raise Exception("Unable to download NIFTY data")
 
 nifty_return = (
-    nifty["Close"].iloc[-1] /
-    nifty["Close"].iloc[-30] - 1
+    float(nifty["Close"].iloc[-1]) /
+    float(nifty["Close"].iloc[-30]) - 1
 ) * 100
 
 # --------------------------
-# SCAN
+# SCAN STOCKS
 # --------------------------
 
 for symbol in symbols:
 
     try:
+
+        print(f"Processing {symbol}")
 
         df = yf.download(
             symbol,
@@ -63,42 +75,45 @@ for symbol in symbols:
         )
 
         if len(df) < 90:
+            print(f"Skipping {symbol} - insufficient data")
             continue
+
+        close = df["Close"]
+        volume = df["Volume"]
 
         # Relative Strength
         stock_return = (
-            df["Close"].iloc[-1] /
-            df["Close"].iloc[-30] - 1
+            float(close.iloc[-1]) /
+            float(close.iloc[-30]) - 1
         ) * 100
 
         relative_strength = stock_return - nifty_return
 
         # Volume Persistence
-        vol5 = df["Volume"].tail(5).mean()
-        vol60 = df["Volume"].tail(60).mean()
+        vol5 = float(volume.tail(5).mean())
+        vol60 = float(volume.tail(60).mean())
 
-        volume_ratio = vol5 / vol60 if vol60 > 0 else 0
+        if vol60 == 0:
+            volume_ratio = 0
+        else:
+            volume_ratio = vol5 / vol60
 
         # Attention Acceleration
         ret20 = (
-            df["Close"].iloc[-1] /
-            df["Close"].iloc[-20] - 1
+            float(close.iloc[-1]) /
+            float(close.iloc[-20]) - 1
         ) * 100
 
-        volatility = (
-            df["Close"]
-            .pct_change()
-            .tail(90)
-            .std()
+        volatility = float(
+            close.pct_change().tail(90).std()
         )
 
-        attention_acceleration = (
-            ret20 / volatility
-            if volatility > 0
-            else 0
-        )
+        if volatility == 0:
+            attention_acceleration = 0
+        else:
+            attention_acceleration = ret20 / volatility
 
-        # Score
+        # Final Score
         score = (
             0.30 * relative_strength +
             40 * volume_ratio +
@@ -115,11 +130,14 @@ for symbol in symbols:
             0
         ])
 
+        print(f"Success: {symbol}")
+
     except Exception as e:
-        print(symbol, e)
+
+        print(f"ERROR: {symbol} -> {e}")
 
 # --------------------------
-# RANK
+# SORT & RANK
 # --------------------------
 
 results = sorted(
