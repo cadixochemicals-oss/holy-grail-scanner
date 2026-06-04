@@ -8,30 +8,29 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 
 # --------------------------
-# GOOGLE SHEETS CONNECTION
+# GOOGLE SHEETS
 # --------------------------
 
 creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
-scopes = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-
 creds = Credentials.from_service_account_info(
     creds_dict,
-    scopes=scopes
+    scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
 )
 
 client = gspread.authorize(creds)
 
-sheet_id = os.environ["GOOGLE_SHEET_ID"]
+spreadsheet = client.open_by_key(
+    os.environ["GOOGLE_SHEET_ID"]
+)
 
-spreadsheet = client.open_by_key(sheet_id)
 worksheet = spreadsheet.worksheet("Daily_MRS")
 
 # --------------------------
-# LOAD SYMBOLS
+# SYMBOLS
 # --------------------------
 
 symbols = pd.read_csv("symbols.csv")["Symbol"].tolist()
@@ -39,26 +38,27 @@ symbols = pd.read_csv("symbols.csv")["Symbol"].tolist()
 results = []
 
 # --------------------------
-# NIFTY DATA
+# NIFTY
 # --------------------------
 
 nifty = yf.download(
     "^NSEI",
     period="3mo",
-    auto_adjust=True,
-    progress=False
+    progress=False,
+    auto_adjust=True
 )
 
-if len(nifty) < 30:
-    raise Exception("Unable to download NIFTY data")
+print("NIFTY columns:", nifty.columns)
+
+nifty_close = nifty["Close"].squeeze()
 
 nifty_return = (
-    float(nifty["Close"].iloc[-1]) /
-    float(nifty["Close"].iloc[-30]) - 1
+    nifty_close.iloc[-1] /
+    nifty_close.iloc[-30] - 1
 ) * 100
 
 # --------------------------
-# SCAN STOCKS
+# STOCK LOOP
 # --------------------------
 
 for symbol in symbols:
@@ -70,50 +70,48 @@ for symbol in symbols:
         df = yf.download(
             symbol,
             period="6mo",
-            auto_adjust=True,
-            progress=False
+            progress=False,
+            auto_adjust=True
         )
 
         if len(df) < 90:
-            print(f"Skipping {symbol} - insufficient data")
+            print(f"Skipping {symbol}")
             continue
 
-        close = df["Close"]
-        volume = df["Volume"]
+        close = df["Close"].squeeze()
+        volume = df["Volume"].squeeze()
 
-        # Relative Strength
         stock_return = (
-            float(close.iloc[-1]) /
-            float(close.iloc[-30]) - 1
+            close.iloc[-1] /
+            close.iloc[-30] - 1
         ) * 100
 
         relative_strength = stock_return - nifty_return
 
-        # Volume Persistence
-        vol5 = float(volume.tail(5).mean())
-        vol60 = float(volume.tail(60).mean())
+        vol5 = volume.tail(5).mean()
+        vol60 = volume.tail(60).mean()
 
-        if vol60 == 0:
-            volume_ratio = 0
-        else:
+        volume_ratio = 0
+
+        if vol60 != 0:
             volume_ratio = vol5 / vol60
 
-        # Attention Acceleration
         ret20 = (
-            float(close.iloc[-1]) /
-            float(close.iloc[-20]) - 1
+            close.iloc[-1] /
+            close.iloc[-20] - 1
         ) * 100
 
-        volatility = float(
-            close.pct_change().tail(90).std()
+        volatility = (
+            close.pct_change()
+            .tail(90)
+            .std()
         )
 
-        if volatility == 0:
-            attention_acceleration = 0
-        else:
+        attention_acceleration = 0
+
+        if volatility != 0:
             attention_acceleration = ret20 / volatility
 
-        # Final Score
         score = (
             0.30 * relative_strength +
             40 * volume_ratio +
@@ -124,20 +122,20 @@ for symbol in symbols:
             datetime.today().strftime("%Y-%m-%d"),
             symbol,
             0,
-            round(volume_ratio, 2),
-            round(relative_strength, 2),
-            round(score, 2),
+            round(float(volume_ratio), 2),
+            round(float(relative_strength), 2),
+            round(float(score), 2),
             0
         ])
 
-        print(f"Success: {symbol}")
+        print(f"SUCCESS {symbol}")
 
     except Exception as e:
 
-        print(f"ERROR: {symbol} -> {e}")
+        print(f"ERROR {symbol}: {e}")
 
 # --------------------------
-# SORT & RANK
+# RANK
 # --------------------------
 
 results = sorted(
